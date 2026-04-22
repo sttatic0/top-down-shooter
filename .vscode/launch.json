@@ -1,0 +1,12 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Build and Run (Batch)",
+            "type": "node-terminal", 
+            "request": "launch",
+            "command": "${workspaceFolder}\\build.bat",
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
