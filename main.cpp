@@ -31,6 +31,8 @@ struct Animator {
 };
 
 
+
+
 struct Player {
     
     Texture2D texture;
@@ -47,6 +49,7 @@ struct Player {
     bool invincible;
     int points;
     int melee_damage;
+    bool is_alive;
 };
 
 struct Gun {
@@ -92,7 +95,7 @@ struct Exp_orb {
 
 
 
-void bullet_controller(std::vector<Bullet>& bullets, Player player) {
+void bullet_controller(std::vector<Bullet>& bullets, Player &player) {
     float despawnMargin = 100.0f;
     float boundX = (GetScreenWidth() / 2.0f) + despawnMargin;
     float boundY = (GetScreenHeight() / 2.0f) + despawnMargin;
@@ -196,8 +199,6 @@ void enemy_controller(std::vector<Enemy>& enemies, Player &player, Texture2D ene
             needsRecalc = true;
         }
 
-       // std::cout << "Timer: " << timer << '\n';
-
         if (needsRecalc) {
             Vector2 diff = Vector2Subtract(player.position, enemies[i].position);
             enemies[i].direction = Vector2Normalize(diff);
@@ -221,6 +222,9 @@ void collision_controller(std::vector<Bullet>& bullets, std::vector<Enemy>& enem
             if (!player.invincible){
                 player.health -= enemies[j].damage;
                 player.invincible = true;
+                if (player.health <= 0){
+                    player.is_alive = false;
+                }
             }
             enemies[j].is_attacking = true;
             enemies[j].is_walking = false;
@@ -249,7 +253,7 @@ void collision_controller(std::vector<Bullet>& bullets, std::vector<Enemy>& enem
     }
 }
 
-void spawn_enemy(float &spawn_timer, std::vector<Enemy> &enemies, Player player, int &enemies_to_spawn){
+void spawn_enemy(float &spawn_timer, std::vector<Enemy> &enemies, Player &player, int &enemies_to_spawn){
     if (spawn_timer >= 1 && enemies_to_spawn > 0) { //&& GetTime() < 4) {
         Enemy newEnemy;
         
@@ -281,7 +285,7 @@ void spawn_enemy(float &spawn_timer, std::vector<Enemy> &enemies, Player player,
         
         newEnemy.speed = 100;
         newEnemy.health = 10;
-        newEnemy.damage = 5;
+        newEnemy.damage = 50;
         newEnemy.rotation = 0;
         newEnemy.scale = 0.3f;
         newEnemy.direction = Vector2Normalize(Vector2Subtract(player.position, newEnemy.position));
@@ -302,7 +306,7 @@ void load_animation(std::map<std::string, std::vector<Texture2D>>& lib, std::str
 }
 
 
-void debug_colliders(std::vector<Enemy> &enemies, Texture2D enemyTex, Player player){
+void debug_colliders(std::vector<Enemy> &enemies, Texture2D enemyTex, Player &player){
     for (size_t i = 0; i < enemies.size(); i++) {
         DrawCircleLinesV(enemies[i].position, 40, RED);
     }
@@ -346,7 +350,7 @@ int main() {
     player.animator.fps = 15;
     player.points = 0;
     player.melee_damage = 4;
-
+    player.is_alive = true;
 
     Gun rifle;
     rifle.bullet_speed = 2500;
@@ -390,11 +394,8 @@ int main() {
 
     float spawn_timer = 0.0f;
     float reload_timer = current_gun->reload_time;
-    float invincible_timer = 2.0f;
-    Image bgImg = LoadImage("bullet.png");
-    if (bgImg.data != NULL) ImageResize(&bgImg, 100, 100);
-    Texture2D background_texture = LoadTextureFromImage(bgImg);
-    UnloadImage(bgImg);
+    float invincible_timer = 1.0f;
+    Texture2D background_texture = LoadTexture("bg2.png");
 
     Camera2D camera = { 0 };
     camera.zoom = 1.0f;
@@ -410,9 +411,7 @@ int main() {
     bool is_reloading = false;
     //misc
     Vector2 direction = { 0, 0 };
-    /*for(int i = 0; i < sizeof(animator_table_test); i++){
-        std::cout << animator_table_test[i] << '\n';
-    }*/
+
     bool is_moving = false;
     
     bool is_shooting;
@@ -441,7 +440,7 @@ int main() {
         spawn_timer += delta_time;
 
         // Player Movement
-        if (!is_buy_menu_open){
+        if (!is_buy_menu_open && player.is_alive){
             HideCursor();
             direction = { 0, 0 };
             if (IsKeyDown(KEY_W) || IsKeyDown(KEY_UP)) direction.y -= 1.0f;
@@ -468,7 +467,7 @@ int main() {
             if (Vector2Length(direction) > 0) {
                 direction = Vector2Normalize(direction);
                 is_moving = true;
-                //std::cout << "Is moving" << '\n';
+           
             }
             else{
                 is_moving = false;
@@ -540,19 +539,13 @@ int main() {
                 current_gun->max_current_ammo -= to_add;
             }
         }
-
-        /*while (player.exp >= player.level_threshold){
-            player.level++;
-            player.exp -= player.level_threshold;
-            player.level_threshold *= 1.66f;
-        }*/
         BeginDrawing();
         ClearBackground(RAYWHITE);
         
         if (player.invincible == true){
             if (invincible_timer <= 0){
                 player.invincible = false;
-                invincible_timer = 2.0f;
+                invincible_timer = 1.0f;
             }
             invincible_timer -= delta_time;
         }
@@ -623,7 +616,7 @@ int main() {
         
 
         
-        if (!is_buy_menu_open){
+        if (!is_buy_menu_open && player.is_alive){
             collision_controller(bullets, enemies, player, exp_orbs, enemyTexture, orbTexture, *current_gun, is_melee);
             enemy_controller(enemies, player, enemyTexture, exp_orbs, animations, enemies_to_defeat);
             bullet_controller(bullets, player);
@@ -631,13 +624,10 @@ int main() {
             spawn_enemy(spawn_timer, enemies, player, enemies_to_spawn);
         }
         EndMode2D();
-        std::cout << spawn_timer << '\n';
-
         
         Vector2 screenPos = GetWorldToScreen2D({ player.position.x, player.position.y - 20 }, camera);
         
-        //DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), ColorAlpha(BLACK, 0.4f));
-        
+
         if (player.health >= player.max_health) 
             player.health = player.max_health;
         
@@ -646,8 +636,7 @@ int main() {
         
         //HP bar
         DrawRectangle(screenPos.x - 55, screenPos.y - 30, (player.health / player.max_health) * 100, 7, RED);
-        //GuiProgressBar((Rectangle){ screenPos.x - 25, screenPos.y, player.max_health, 5 }, NULL, NULL, &player.health, 0, player.max_health); 
-        
+
         DrawText(TextFormat("TIMER: %.1f", wave_timer), GetScreenWidth() / 2 - 20, 10, 20, DARKGRAY);
         DrawText(TextFormat("WAVE: %i", wave), GetScreenWidth() / 2 - 20, 30, 20, DARKGRAY);
         DrawText(TextFormat("POINTS: %i", player.points), 10, GetScreenHeight() - 30, 20, DARKGRAY);
@@ -695,7 +684,7 @@ int main() {
                 player.points -= 800;
             }
 
-            // Option 5: THE RIFLE
+            // Option 5: Rifle
             if (!rifle.is_unlocked) {
                 if (GuiButton((Rectangle){ x + 50, y + 200, 600, 60 }, "UNLOCK ASSAULT RIFLE (Cost: 3000)") && player.points >= 3000) {
                     rifle.is_unlocked = true;
@@ -711,6 +700,73 @@ int main() {
                 spawn_timer = 0;
             }
         }
+
+        else if (!player.is_alive)
+        {
+            ShowCursor();
+            DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), ColorAlpha(BLACK, 0.5f));
+            
+            float winW = 700, winH = 400;
+            float x = (GetScreenWidth() - winW) / 2;
+            float y = (GetScreenHeight() - winH) / 2;
+
+            GuiWindowBox((Rectangle){ x, y, winW, winH }, TextFormat("WAVE %i COMPLETED! SHOP", wave - 1));
+
+            if (GuiButton((Rectangle){ x + 250, y + 120, 200, 40 }, "RESTART")) {
+ 
+                player.position = { 500, 500 };
+                player.speed = 150;
+                player.max_health = 30;
+                player.health = player.max_health;
+                player.points = 0;
+                player.melee_damage = 4;
+                player.is_alive = true;
+                player.invincible = false;
+
+                rifle.bullet_speed = 2500;
+                rifle.ammo_in_magazine = 30;
+                rifle.damage = 15;
+                rifle.magazine_size = 30;
+                rifle.max_all_ammo = 90;
+                rifle.max_current_ammo = 30;
+                rifle.reload_time = 2.0f; 
+                rifle.is_unlocked = false;
+
+                handgun.bullet_speed = 2500;
+                handgun.ammo_in_magazine = 10;
+                handgun.damage = 5;
+                handgun.magazine_size = 10;
+                handgun.max_all_ammo = 40;
+                handgun.max_current_ammo = 10;
+                handgun.reload_time = 1.5f; 
+                handgun.is_unlocked = true;
+
+                current_gun = &handgun;
+                current_gun_state = 0;
+
+                enemies.clear();
+                bullets.clear();
+                exp_orbs.clear();
+                
+                spawn_timer = 0.0f;
+                wave_timer = 30.0f; 
+                wave = 1;
+                enemies_to_defeat = 5;
+                enemies_to_spawn = 5;
+                
+                is_reloading = false;
+                is_moving = false;
+                is_melee = false;
+                is_buy_menu_open = false;
+
+                camera.target = player.position;
+            }
+
+            if (GuiButton((Rectangle){ x + 250, y + 220, 200, 40 }, "EXIT")) {
+                break;
+            }
+        }
+        
         EndDrawing();
     }
    
