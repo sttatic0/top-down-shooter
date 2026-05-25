@@ -366,7 +366,7 @@ int main() {
     float spawn_timer = 0.0f;
     float reload_timer = current_gun->reload_time;
     float invincible_timer = 0.6f;
-    Texture2D background_texture = LoadTexture("background.png");
+    Texture2D background_texture = LoadTexture("assets\\background.png");
 
     Camera2D camera = { 0 };
     camera.zoom = 1.0f;
@@ -376,7 +376,7 @@ int main() {
     std::vector<Bullet> bullets;
     std::vector<Enemy> enemies;
     
-    Texture2D crosshair_texture = LoadTexture("crosshair.png");
+    Texture2D crosshair_texture = LoadTexture("assets\\crosshair.png");
 
     bool is_reloading = false;
     Vector2 direction = { 0, 0 };
@@ -396,13 +396,13 @@ int main() {
     bool is_paused = false;
 
     Sound zombie_grunts[3];
-    zombie_grunts[0] = LoadSound("zombie-8.wav");
-    zombie_grunts[1] = LoadSound("zombie-9.wav");
-    zombie_grunts[2] = LoadSound("zombie-12.wav");
+    zombie_grunts[0] = LoadSound("assets\\zombie-8.wav");
+    zombie_grunts[1] = LoadSound("assets\\zombie-9.wav");
+    zombie_grunts[2] = LoadSound("assets\\zombie-12.wav");
 
     float zombie_grunt_timer = (float)GetRandomValue(5, 15);
-    Sound gun_shot = LoadSound("shot.mp3");
-    Music music = LoadMusicStream("music.mp3");
+    Sound gun_shot = LoadSound("assets\\shot.mp3");
+    Music music = LoadMusicStream("assets\\music.mp3");
     PlayMusicStream(music);
 
     SetMasterVolume(0.5f);
@@ -505,7 +505,7 @@ int main() {
                 int total_melee_frames = animations[current_anim].size();
                 if (player.animator.current_frame >= total_melee_frames - 1) {
                     is_melee = false;
-                    has_melee_hit = false; // FIXED: Safely reset state flags for the next activation call
+                    has_melee_hit = false;
                 }
             } else {
                 is_melee = false; 
