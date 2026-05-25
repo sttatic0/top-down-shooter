@@ -6,6 +6,8 @@
 #include "raygui.h"
 #include <filesystem>
 #include <map>
+#include <cmath>
+#include <algorithm>
 
 struct Animator {
     std::string current_animation;
@@ -22,6 +24,7 @@ struct Animator {
     }
 
     void Update(float delta_time, int total_frames) {
+        if (total_frames <= 0) return;
         frame_timer += delta_time;
         if (frame_timer >= (1.0f / fps)) {
             frame_timer = 0;
@@ -30,11 +33,7 @@ struct Animator {
     }
 };
 
-
-
-
 struct Player {
-    
     Texture2D texture;
     Vector2 position;
     Vector2 scaled_width_height;
@@ -42,8 +41,6 @@ struct Player {
     float speed;
     float health;
     float max_health;
-    float armor;
-    float health_regen;
     float rotation;
     float scale;
     bool invincible;
@@ -86,15 +83,6 @@ struct Bullet {
     float speed;
 };
 
-struct Exp_orb {
-    Vector2 position;
-    //Vector2 direction;    //TODO
-    int value;
-};
-
-
-
-
 void bullet_controller(std::vector<Bullet>& bullets, Player &player) {
     float despawnMargin = 100.0f;
     float boundX = (GetScreenWidth() / 2.0f) + despawnMargin;
@@ -114,23 +102,12 @@ void bullet_controller(std::vector<Bullet>& bullets, Player &player) {
     }
 }
 
-
-void drop_exp(std::vector<Exp_orb>& exp_orbs, float enemy_x, float enemy_y) {
-    Exp_orb exp_orb;
-    exp_orb.position.x = enemy_x;
-    exp_orb.position.y = enemy_y;
-    exp_orb.value = 130;
-    exp_orbs.push_back(exp_orb);
-}
-
-void enemy_controller(std::vector<Enemy>& enemies, Player &player, Texture2D enemyTex, std::vector<Exp_orb>& exp_orbs, std::map<std::string, std::vector<Texture2D>> &animations, int &enemies_to_defeat) {
-
-    float extraBuffer = 100.0f; // teleport slightly offscreen
+void enemy_controller(std::vector<Enemy>& enemies, Player &player, std::map<std::string, std::vector<Texture2D>> &animations, int &enemies_to_defeat) {
+    float extraBuffer = 100.0f; 
     float boundaryX = (GetScreenWidth() / 2.0f) + extraBuffer;
     float boundaryY = (GetScreenHeight() / 2.0f) + extraBuffer;
 
     for (size_t i = 0; i < enemies.size(); i++) {
-
         if (enemies[i].is_walking){
             enemies[i].position.x += enemies[i].direction.x * enemies[i].speed * GetFrameTime();
             enemies[i].position.y += enemies[i].direction.y * enemies[i].speed * GetFrameTime();
@@ -156,10 +133,9 @@ void enemy_controller(std::vector<Enemy>& enemies, Player &player, Texture2D ene
         }
 
         std::string animName = enemies[i].animator.current_animation;
-
-        
         std::vector<Texture2D>& frames = animations[animName];
 
+        if (frames.empty()) continue;
 
         if (enemies[i].animator.current_frame >= frames.size()) {
             enemies[i].animator.current_frame = 0;
@@ -175,38 +151,28 @@ void enemy_controller(std::vector<Enemy>& enemies, Player &player, Texture2D ene
 
         enemies[i].animator.Update(GetFrameTime(), frames.size());
         DrawTexturePro(currentFrameTex, source, dest, origin, enemies[i].rotation, WHITE);
-            
-        
-        bool needsRecalc = true;
-
-        
 
         if (enemies[i].position.y > player.position.y + boundaryY) {
             enemies[i].position.y = player.position.y - boundaryY;
-            needsRecalc = true;
         }
         else if (enemies[i].position.y < player.position.y - boundaryY) {
             enemies[i].position.y = player.position.y + boundaryY;
-            needsRecalc = true;
         }
 
         if (enemies[i].position.x > player.position.x + boundaryX) {
             enemies[i].position.x = player.position.x - boundaryX;
-            needsRecalc = true;
         }
         else if (enemies[i].position.x < player.position.x - boundaryX) {
             enemies[i].position.x = player.position.x + boundaryX;
-            needsRecalc = true;
         }
 
-        if (needsRecalc) {
-            Vector2 diff = Vector2Subtract(player.position, enemies[i].position);
-            enemies[i].direction = Vector2Normalize(diff);
-        }
+       
+        Vector2 diff = Vector2Subtract(player.position, enemies[i].position);
+        enemies[i].direction = Vector2Normalize(diff);
+        
 
         if (enemies[i].health <= 0) {
-            //drop_exp(exp_orbs, enemies[i].position.x, enemies[i].position.y);
-            player.points += 100;
+            player.points += 150; 
             enemies_to_defeat--;
             enemies.erase(enemies.begin() + i);
             i--;
@@ -214,11 +180,9 @@ void enemy_controller(std::vector<Enemy>& enemies, Player &player, Texture2D ene
     }
 }
 
-void collision_controller(std::vector<Bullet>& bullets, std::vector<Enemy>& enemies, Player& player, std::vector<Exp_orb>& exp_orbs, Texture2D enemyTex, Texture2D orbTex, Gun &gun, bool is_melee) {
-
+void collision_controller(std::vector<Bullet>& bullets, std::vector<Enemy>& enemies, Player& player, Gun &gun, bool is_melee, bool &has_melee_hit) {
     for (size_t j = 0; j < enemies.size(); j++) {
-   
-        if (CheckCollisionCircles(player.position, 5, enemies[j].position, 40) && !enemies[j].is_attacking){
+        if (CheckCollisionCircles(player.position, 25, enemies[j].position, 30) && !enemies[j].is_attacking){
             if (!player.invincible){
                 player.health -= enemies[j].damage;
                 player.invincible = true;
@@ -228,43 +192,35 @@ void collision_controller(std::vector<Bullet>& bullets, std::vector<Enemy>& enem
             }
             enemies[j].is_attacking = true;
             enemies[j].is_walking = false;
-            enemies[j].attacking_timer = 1;
+            enemies[j].attacking_timer = 0.8f;
         }
-        if (CheckCollisionCircles(player.position, 40, enemies[j].position, 40) && is_melee){
-            enemies[j].health -= player.melee_damage;
+
+        if (is_melee && !has_melee_hit) {
+            if (CheckCollisionCircles(player.position, 50, enemies[j].position, 40)){
+                enemies[j].health -= player.melee_damage;
+                has_melee_hit = true;
+            }
         }
 
         for (size_t i = 0; i < bullets.size(); i++) {
-            if (CheckCollisionCircles(bullets[i].position, 5, enemies[j].position, 40)) {
+            if (CheckCollisionCircles(bullets[i].position, 5, enemies[j].position, 30)) {
                 enemies[j].health -= gun.damage;
                 bullets.erase(bullets.begin() + i);
                 i--;
+                break; 
             }
-        }
-    }
-
-    for (size_t k = 0; k < exp_orbs.size(); k++) {
-        DrawTextureEx(orbTex, exp_orbs[k].position, 0, 0.2f, WHITE);
-
-        if (CheckCollisionCircles(player.position, 40, exp_orbs[k].position, 5)) {
-            exp_orbs.erase(exp_orbs.begin() + k);
-            k--;
         }
     }
 }
 
-void spawn_enemy(float &spawn_timer, std::vector<Enemy> &enemies, Player &player, int &enemies_to_spawn){
-    if (spawn_timer >= 1 && enemies_to_spawn > 0) { //&& GetTime() < 4) {
+void spawn_enemy(float &spawn_timer, std::vector<Enemy> &enemies, Player &player, int &enemies_to_spawn, int &wave){
+    float spawnRate = std::max(0.4f, 1.0f - (wave * 0.06f)); 
+    if (spawn_timer >= spawnRate && enemies_to_spawn > 0) { 
         Enemy newEnemy;
         
-        
-        if (GetRandomValue(0, 1) == 1){ //Top/Bottom or Left/Right spawn
-
-
-            if (GetRandomValue(0, 1) == 1){//Top or bottom spawn
-                
+        if (GetRandomValue(0, 1) == 1){ 
+            if (GetRandomValue(0, 1) == 1){
                 newEnemy.position.y = player.position.y - GetScreenHeight() / 2 - 50;
-
             }
             else{
                 newEnemy.position.y = player.position.y + GetScreenHeight() / 2 + 50;
@@ -272,175 +228,204 @@ void spawn_enemy(float &spawn_timer, std::vector<Enemy> &enemies, Player &player
             newEnemy.position.x = player.position.x + GetRandomValue(-GetScreenWidth() / 2, GetScreenWidth() / 2);
         }
         else{
-            if (GetRandomValue(0, 1) == 1){//Left or right spawn
+            if (GetRandomValue(0, 1) == 1){
                 newEnemy.position.x = player.position.x - GetScreenWidth() / 2 - 50;
             } 
             else{
                 newEnemy.position.x = player.position.x + GetScreenWidth() / 2 + 50;
-
             }
             newEnemy.position.y = player.position.y + GetRandomValue(-GetScreenHeight() / 2, GetScreenHeight() / 2);
         }     
         
-        
-        newEnemy.speed = 100;
-        newEnemy.health = 10;
-        newEnemy.damage = 50;
+        newEnemy.speed = 160.0f + (wave * 6.0f);   
+        newEnemy.health = 10 + (wave * 3);         
+        newEnemy.damage = 5 + (wave * 1.5f);       
         newEnemy.rotation = 0;
-        newEnemy.scale = 0.3f;
+        newEnemy.scale = 0.6f;
         newEnemy.direction = Vector2Normalize(Vector2Subtract(player.position, newEnemy.position));
-
-        newEnemy.animator.fps = 12;
+        newEnemy.animator.fps = 20;
+        
         enemies.push_back(newEnemy);
-        spawn_timer -= 1;
-
+        spawn_timer = 0.0f;
         enemies_to_spawn--;
     }
 }
 
 void load_animation(std::map<std::string, std::vector<Texture2D>>& lib, std::string key, std::string path) {
+    if (!std::filesystem::exists(path)) return;
     for (const auto& entry : std::filesystem::directory_iterator(path)) {
         Texture2D tex = LoadTexture(entry.path().string().c_str());
         lib[key].push_back(tex);
     }
 }
 
-
-void debug_colliders(std::vector<Enemy> &enemies, Texture2D enemyTex, Player &player){
-    for (size_t i = 0; i < enemies.size(); i++) {
-        DrawCircleLinesV(enemies[i].position, 40, RED);
-    }
-    DrawCircleLinesV(player.position, 40, RED);
-}
-
-
 void wave_controller(int &enemies_to_defeat, int &wave, float &wave_timer, bool &is_buy_menu_open, int &enemies_to_spawn){
     if (enemies_to_defeat <= 0 || wave_timer <= 0){
         wave++;
         is_buy_menu_open = true;
-        wave_timer = 30;
-        enemies_to_defeat = 5;
-        enemies_to_spawn = 5;
+        wave_timer = 30.0f + (wave * 2.0f);
+        enemies_to_defeat = 8 + (wave * 2);
+        enemies_to_spawn = 8 + (wave * 2);
     }
-
     wave_timer -= GetFrameTime();
 }
 
+void player_bounds(Player &player) {
+    if (player.position.x >= 6700) {
+        player.position.x = 6700;
+    }
+    else if (player.position.x <= 970) {
+        player.position.x = 970;
+    }
+
+    if (player.position.y >= 2450) {
+        player.position.y = 2450;
+    }
+    else if (player.position.y <= 550) {
+        player.position.y = 550;
+    }
+}
+
+void clamp_camera_to_bounds(Camera2D &camera, Vector2 player_pos) {
+    camera.target = player_pos;
+
+    float halfScreenWidth = GetScreenWidth() / 2.0f;
+    float halfScreenHeight = GetScreenHeight() / 2.0f;
+
+    float mapLeft = 970.0f;
+    float mapRight = 6700.0f;
+    float mapTop = 550.0f;
+    float mapBottom = 2450.0f;
+
+    camera.target.x = std::clamp(camera.target.x, mapLeft + halfScreenWidth, mapRight - halfScreenWidth);
+    camera.target.y = std::clamp(camera.target.y, mapTop + halfScreenHeight, mapBottom - halfScreenHeight);
+}
+
 int main() {
-    int screen_width = GetMonitorWidth(GetCurrentMonitor()); 
-    
-    int screen_height = GetMonitorHeight(GetCurrentMonitor());
-    //SetConfigFlags(FLAG_FULLSCREEN_MODE);
-    InitWindow(1920, 1080, "Raylib Game");
+    InitWindow(GetMonitorWidth(0), GetMonitorHeight(0), "Raylib Game");
+    SetWindowState(2);
+    InitAudioDevice();
     SetTargetFPS(120);
 
     Player player;
-    Texture2D enemyTexture = LoadTexture("enemy.png");
-    
-    Texture2D orbTexture = LoadTexture("exp_orb.png");
-
-    player.position.x = 500;
-    player.position.y = 500;
-    player.speed = 150;
-    player.max_health = 30;
+    player.position = { 960 + float(GetScreenWidth()) / 2, 540 + float(GetScreenHeight() / 2)};
+    player.speed = 180;
+    player.max_health = 40;
     player.health = player.max_health;
-    player.scale = 0.3f;
-    player.scaled_width_height = {player.texture.width * player.scale, player.texture.height * player.scale};
+    player.scale = 0.525f;
     player.invincible = false;
-    player.animator.fps = 15;
+    player.animator.fps = 25;
     player.points = 0;
-    player.melee_damage = 4;
+    player.melee_damage = 8;
     player.is_alive = true;
 
+    int hp_level = 1;
+    int dmg_level = 1;
+    int speed_level = 1;
+    int hp_refill_level = 1;
+
     Gun rifle;
-    rifle.bullet_speed = 2500;
+    rifle.bullet_speed = 2200;
     rifle.ammo_in_magazine = 30;
     rifle.damage = 15;
     rifle.magazine_size = 30;
-    rifle.max_all_ammo = 90;
-    rifle.max_current_ammo = 30;
-    rifle.reload_time = 2.0f; 
+    rifle.max_all_ammo = 450; 
+    rifle.max_current_ammo = 120;
+    rifle.reload_time = 1.8f; 
     rifle.is_unlocked = false;
 
     Gun handgun;
-    handgun.bullet_speed = 2500;
+    handgun.bullet_speed = 1800;
     handgun.ammo_in_magazine = 10;
-    handgun.damage = 5;
+    handgun.damage = 7;
     handgun.magazine_size = 10;
-    handgun.max_all_ammo = 40;
-    handgun.max_current_ammo = 10;
-    handgun.reload_time = 1.5f; 
+    handgun.max_all_ammo = 250; 
+    handgun.max_current_ammo = 80;
+    handgun.reload_time = 1.2f; 
     handgun.is_unlocked = true;
     
     Gun *current_gun = &handgun;
     int current_gun_state = 0;
 
     std::map<std::string, std::vector<Texture2D>> animations;
-    load_animation(animations, "rifle_idle", "rifle/idle");
-    load_animation(animations, "rifle_walk", "rifle/move");
-    load_animation(animations, "rifle_shoot", "rifle/shoot");
-    load_animation(animations, "rifle_reload", "rifle/reload");
-    load_animation(animations, "rifle_melee", "rifle/meleeattack");
     load_animation(animations, "handgun_idle", "handgun/idle");
     load_animation(animations, "handgun_reload", "handgun/reload");
     load_animation(animations, "handgun_walk", "handgun/move");
     load_animation(animations, "handgun_shoot", "handgun/shoot");
     load_animation(animations, "handgun_melee", "handgun/meleeattack");
+    
+    load_animation(animations, "rifle_idle", "rifle/idle");
+    load_animation(animations, "rifle_reload", "rifle/reload");
+    load_animation(animations, "rifle_walk", "rifle/move");
+    load_animation(animations, "rifle_shoot", "rifle/shoot");
+    load_animation(animations, "rifle_melee", "rifle/meleeattack");
 
     load_animation(animations, "enemy_walk", "enemy/walk");
     load_animation(animations, "enemy_attack", "enemy/attack");
-    //load_animation(animations, "zombie_walk", "assets/enemies/zombie/walk");
-    //load_animation(animations, "handgun_shoot", "assets/handgun/shoot");
 
     float spawn_timer = 0.0f;
     float reload_timer = current_gun->reload_time;
-    float invincible_timer = 1.0f;
-    Texture2D background_texture = LoadTexture("bg2.png");
+    float invincible_timer = 0.6f;
+    Texture2D background_texture = LoadTexture("background.png");
 
     Camera2D camera = { 0 };
     camera.zoom = 1.0f;
     camera.target = player.position;
     camera.offset = { GetScreenWidth() / 2.0f, GetScreenHeight() / 2.0f };
-    std::vector<Exp_orb> exp_orbs;
+    
     std::vector<Bullet> bullets;
     std::vector<Enemy> enemies;
-    
     
     Texture2D crosshair_texture = LoadTexture("crosshair.png");
 
     bool is_reloading = false;
-    //misc
     Vector2 direction = { 0, 0 };
-
     bool is_moving = false;
-    
-    bool is_shooting;
-
+    bool is_shooting = false;
     float shoot_anim_timer = 0.0f;
-    const float SHOOT_DURATION = 0.15f;
+    const float SHOOT_DURATION = 0.12f;
 
-    //Wave shit
-    float wave_timer = 30; 
+    float wave_timer = 30.0f; 
     bool is_buy_menu_open = false;
     int wave = 1;
-    int enemies_to_defeat = 5;
-    int enemies_to_spawn = 5;
+    int enemies_to_defeat = 8;
+    int enemies_to_spawn = 8;
 
     bool is_melee = false;
-    float melee_timer;
+    bool has_melee_hit = false;
+    bool is_paused = false;
+
+    Sound zombie_grunts[3];
+    zombie_grunts[0] = LoadSound("zombie-8.wav");
+    zombie_grunts[1] = LoadSound("zombie-9.wav");
+    zombie_grunts[2] = LoadSound("zombie-12.wav");
+
+    float zombie_grunt_timer = (float)GetRandomValue(5, 15);
+    Sound gun_shot = LoadSound("shot.mp3");
+    Music music = LoadMusicStream("music.mp3");
+    PlayMusicStream(music);
+
+    SetMasterVolume(0.5f);
     while (!WindowShouldClose()) {
-
+        
+        float delta_time = GetFrameTime();
         Vector2 mouseWorldPos = GetScreenToWorld2D(GetMousePosition(), camera);
-
+        UpdateMusicStream(music);
         float dx = mouseWorldPos.x - player.position.x;
         float dy = mouseWorldPos.y - player.position.y;
-
         float radians = atan2f(dy, dx);
-        float delta_time = GetFrameTime();
-        spawn_timer += delta_time;
 
-        // Player Movement
-        if (!is_buy_menu_open && player.is_alive){
+        if (IsKeyPressed(KEY_P)) {
+            is_paused = !is_paused;
+            if (is_paused) {
+                ShowCursor();
+            } else {
+                HideCursor();
+            }
+        }
+        
+        if (!is_buy_menu_open && player.is_alive && !is_paused){
+            spawn_timer += delta_time;
             HideCursor();
             direction = { 0, 0 };
             if (IsKeyDown(KEY_W) || IsKeyDown(KEY_UP)) direction.y -= 1.0f;
@@ -449,10 +434,8 @@ int main() {
             if (IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT)) direction.x -= 1.0f;
 
             if (!is_reloading){
-
                 if (IsKeyPressed(KEY_ONE) || GetMouseWheelMove() == 1){
                     if (rifle.is_unlocked){
-
                         current_gun = &rifle;
                         current_gun_state = 1;
                     }
@@ -460,29 +443,20 @@ int main() {
                 if (IsKeyPressed(KEY_TWO) || GetMouseWheelMove() == -1){
                     current_gun = &handgun;
                     current_gun_state = 0;
-                    
                 }
             }
             
             if (Vector2Length(direction) > 0) {
                 direction = Vector2Normalize(direction);
                 is_moving = true;
-           
-            }
-            else{
+            } else {
                 is_moving = false;
             }
-
 
             player.position.x += direction.x * player.speed * delta_time;
             player.position.y += direction.y * player.speed * delta_time;
 
-            camera.target = { (player.position.x), (player.position.y) };
-
-            
-            // Shooting
             if ((IsKeyPressed(KEY_SPACE) || IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) && current_gun->ammo_in_magazine > 0 && !is_reloading) {
-                Vector2 mouseWorldPos = GetScreenToWorld2D(GetMousePosition(), camera);
                 Bullet newBullet;
                 float muzzle_forward_offset = 40.0f;
                 float muzzle_side_offset = 15.0f;
@@ -495,24 +469,29 @@ int main() {
                 newBullet.speed = current_gun->bullet_speed;
                 newBullet.direction = Vector2Normalize(Vector2Subtract(mouseWorldPos, newBullet.position));
                 bullets.push_back(newBullet);
+                
                 current_gun->ammo_in_magazine--;
                 is_shooting = true;
                 shoot_anim_timer = SHOOT_DURATION;
+                PlaySound(gun_shot);
             }
+
             if (IsKeyPressed(KEY_R) && current_gun->ammo_in_magazine < current_gun->magazine_size && current_gun->max_current_ammo > 0 && !is_reloading){
                 reload_timer = current_gun->reload_time;
                 is_reloading = true;
                 is_moving = false;
             }
+            
             if (IsKeyPressed(KEY_F) && !is_reloading){
                 is_melee = true;
-                melee_timer = 1.0f;
+                has_melee_hit = false; 
+                player.animator.Play(current_gun_state == 0 ? "handgun_melee" : "rifle_melee");
             }
-            // Spawning
-            
         }
 
-        
+        player_bounds(player);
+        clamp_camera_to_bounds(camera, player.position);
+
         if (shoot_anim_timer > 0) {
             shoot_anim_timer -= delta_time;
             is_shooting = true;
@@ -520,264 +499,284 @@ int main() {
             is_shooting = false;
         }
 
-        if (melee_timer > 0) {
-            melee_timer -= delta_time;
-            is_melee = true;
-        } else {
-            is_melee = false;
+        if (is_melee) {
+            std::string current_anim = player.animator.current_animation;
+            if (animations.find(current_anim) != animations.end() && !animations[current_anim].empty()) {
+                int total_melee_frames = animations[current_anim].size();
+                if (player.animator.current_frame >= total_melee_frames - 1) {
+                    is_melee = false;
+                    has_melee_hit = false; // FIXED: Safely reset state flags for the next activation call
+                }
+            } else {
+                is_melee = false; 
+            }
         }
-        
-        //Reloading
+
+        if (zombie_grunt_timer > 0){
+            zombie_grunt_timer -= delta_time;
+        }
+        else{
+            zombie_grunt_timer = GetRandomValue(5, 15);
+            int rand_idx = GetRandomValue(0, 2);
+            PlaySound(zombie_grunts[rand_idx]);
+        }
+
         if (is_reloading){
             reload_timer -= delta_time;
             if (reload_timer <= 0){
                 is_reloading = false;
                 int needed = current_gun->magazine_size - current_gun->ammo_in_magazine;
                 int to_add = (current_gun->max_current_ammo >= needed) ? needed : current_gun->max_current_ammo;
-                
                 current_gun->ammo_in_magazine += to_add;
                 current_gun->max_current_ammo -= to_add;
             }
         }
+
+        if (player.invincible){
+            invincible_timer -= delta_time;
+            if (invincible_timer <= 0){
+                player.invincible = false;
+                invincible_timer = 0.6f;
+            }
+        } 
+
         BeginDrawing();
         ClearBackground(RAYWHITE);
         
-        if (player.invincible == true){
-            if (invincible_timer <= 0){
-                player.invincible = false;
-                invincible_timer = 1.0f;
-            }
-            invincible_timer -= delta_time;
-        }
         BeginMode2D(camera);
         DrawTexture(background_texture, 0, 0, WHITE);
-
-        debug_colliders(enemies, enemyTexture, player);
         
         player.rotation = radians * (180.0f / PI);
 
-   
         if (is_reloading) {
-            
-            if (current_gun_state == 0) 
-                player.animator.Play("handgun_reload");
-            else if (current_gun_state == 1) 
-                player.animator.Play("rifle_reload");
+            if (current_gun_state == 0) player.animator.Play("handgun_reload");
+            else if (current_gun_state == 1) player.animator.Play("rifle_reload");
         }
         else if (is_melee) {
-            if (current_gun_state == 0)
-                player.animator.Play("handgun_melee");
-            else if (current_gun_state == 1) 
-                player.animator.Play("rifle_melee");
+            if (current_gun_state == 0) player.animator.Play("handgun_melee");
+            else if (current_gun_state == 1) player.animator.Play("rifle_melee");
         } 
         else if (is_shooting) {
-           
-            if (current_gun_state == 0)
-                player.animator.Play("handgun_shoot");
-            else if (current_gun_state == 1) 
-                player.animator.Play("rifle_shoot");
+            if (current_gun_state == 0) player.animator.Play("handgun_shoot");
+            else if (current_gun_state == 1) player.animator.Play("rifle_shoot");
         } 
         else if (is_moving) {
-            
-            if (current_gun_state == 0) 
-                player.animator.Play("handgun_walk");
-            else if (current_gun_state == 1) 
-                player.animator.Play("rifle_walk");
+            if (current_gun_state == 0) player.animator.Play("handgun_walk");
+            else if (current_gun_state == 1) player.animator.Play("rifle_walk");
         } 
         else {
-            
-            if (current_gun_state == 0) 
-                player.animator.Play("handgun_idle");
-            else if (current_gun_state == 1) 
-                player.animator.Play("rifle_idle");
+            if (current_gun_state == 0) player.animator.Play("handgun_idle");
+            else if (current_gun_state == 1) player.animator.Play("rifle_idle");
         }
 
         std::string player_anim = player.animator.current_animation;
+        if (animations.find(player_anim) != animations.end() && !animations[player_anim].empty()) {
+            std::vector<Texture2D>& player_frames = animations[player_anim];
+            Texture2D player_texture = player_frames[player.animator.current_frame % player_frames.size()];
+            Rectangle player_source = { 0.0f, 0.0f, (float)player_texture.width, (float)player_texture.height };
+            float player_destination_width = (float)player_texture.width * player.scale;
+            float player_destination_height = (float)player_texture.height * player.scale;
+            Rectangle player_dest = { player.position.x, player.position.y, player_destination_width, player_destination_height};
+            Vector2 player_origin = { player_destination_width / 2.0f, player_destination_height / 2.0f };
 
+            player.animator.Update(delta_time, player_frames.size());
+            DrawTexturePro(player_texture, player_source, player_dest, player_origin, player.rotation, player.invincible ? RED : WHITE);
+        } else {
+            DrawCircleV(player.position, 20, BLUE); 
+        }
         
-        std::vector<Texture2D>& player_frames = animations[player_anim];
-
-        
-            
-        Texture2D player_texture = player_frames[player.animator.current_frame];
-
-        Rectangle player_source = { 0.0f, 0.0f, (float)player_texture.width, (float)player_texture.height };
-
-        float player_destination_width = (float)player_texture.width * player.scale;
-        float player_destination_height = (float)player_texture.height * player.scale;
-        Rectangle player_dest = { player.position.x, player.position.y, player_destination_width, player_destination_height };
-
-        Vector2 player_origin = { player_destination_width / 2.0f, player_destination_height / 2.0f };
-
-
-        player.animator.Update(delta_time, player_frames.size());
-        DrawTexturePro(player_texture, player_source, player_dest, player_origin, player.rotation, WHITE);
-        
-        
-
-        
-        if (!is_buy_menu_open && player.is_alive){
-            collision_controller(bullets, enemies, player, exp_orbs, enemyTexture, orbTexture, *current_gun, is_melee);
-            enemy_controller(enemies, player, enemyTexture, exp_orbs, animations, enemies_to_defeat);
+        if (!is_buy_menu_open && player.is_alive && !is_paused){
+            collision_controller(bullets, enemies, player, *current_gun, is_melee, has_melee_hit);
+            enemy_controller(enemies, player, animations, enemies_to_defeat);
             bullet_controller(bullets, player);
             wave_controller(enemies_to_defeat, wave, wave_timer, is_buy_menu_open, enemies_to_spawn);
-            spawn_enemy(spawn_timer, enemies, player, enemies_to_spawn);
+            spawn_enemy(spawn_timer, enemies, player, enemies_to_spawn, wave);
         }
         EndMode2D();
         
-        Vector2 screenPos = GetWorldToScreen2D({ player.position.x, player.position.y - 20 }, camera);
+        Vector2 screenPos = GetWorldToScreen2D({ player.position.x, player.position.y - 40 }, camera);
+        if (player.health > player.max_health) player.health = player.max_health;
         
-
-        if (player.health >= player.max_health) 
-            player.health = player.max_health;
-        
-        if (!is_buy_menu_open)
-            DrawTextureEx(crosshair_texture, Vector2{GetMousePosition().x + screenPos.x - GetScreenWidth() / 2 - 25, GetMousePosition().y + screenPos.y - GetScreenHeight() / 2 - 5}, 0, 0.05f, WHITE);
-        
-        //HP bar
-        DrawRectangle(screenPos.x - 55, screenPos.y - 30, (player.health / player.max_health) * 100, 7, RED);
-
-        DrawText(TextFormat("TIMER: %.1f", wave_timer), GetScreenWidth() / 2 - 20, 10, 20, DARKGRAY);
-        DrawText(TextFormat("WAVE: %i", wave), GetScreenWidth() / 2 - 20, 30, 20, DARKGRAY);
-        DrawText(TextFormat("POINTS: %i", player.points), 10, GetScreenHeight() - 30, 20, DARKGRAY);
-
-        if (!is_reloading)
-            DrawText(TextFormat("%i / %i", current_gun->ammo_in_magazine, current_gun->max_current_ammo), GetScreenWidth() - 150, GetScreenHeight() - 50, 20, DARKGRAY);
-        else{
-            DrawText(TextFormat("Reloading..."), GetScreenWidth() - 150, GetScreenHeight() - 50, 20, DARKGRAY);
-            DrawRectangle(screenPos.x - 25, screenPos.y - 50, (reload_timer / current_gun->reload_time) * 50, 5, BLUE);
+        if (!is_buy_menu_open && player.is_alive && !is_paused) {
+            DrawTextureEx(crosshair_texture, Vector2{GetMousePosition().x - 25, GetMousePosition().y - 25}, 0, 0.05f, WHITE);
         }
+        
+        DrawRectangle(screenPos.x - 50, screenPos.y - 10, 100, 8, DARKGRAY);
+        DrawRectangle(screenPos.x - 50, screenPos.y - 10, (player.health / player.max_health) * 100, 8, RED);
 
+        DrawText(TextFormat("TIMER: %.1f", std::max(0.0f, wave_timer)), GetScreenWidth() / 2 - 50, 10, 20, WHITE);
+        DrawText(TextFormat("WAVE: %i", wave), GetScreenWidth() / 2 - 50, 31, 20, WHITE);
+        DrawText(TextFormat("POINTS: %i", player.points), 20, GetScreenHeight() - 40, 24, WHITE);
+
+        if (!is_reloading) {
+            DrawText(TextFormat("AMMO: %i / %i", current_gun->ammo_in_magazine, current_gun->max_current_ammo), GetScreenWidth() - 200, GetScreenHeight() - 40, 22, WHITE);
+        } else {
+            DrawText("RELOADING...", GetScreenWidth() - 200, GetScreenHeight() - 40, 22, WHITE);
+            DrawRectangle(screenPos.x - 25, screenPos.y - 25, ((current_gun->reload_time - reload_timer) / current_gun->reload_time) * 50, 6, BLUE);
+        }
 
         if (is_buy_menu_open) {
             ShowCursor();
-            DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), ColorAlpha(BLACK, 0.5f));
+            DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), ColorAlpha(BLACK, 0.6f));
             
-            float winW = 700, winH = 400;
+            float winW = 750, winH = 500;
             float x = (GetScreenWidth() - winW) / 2;
             float y = (GetScreenHeight() - winH) / 2;
 
-            GuiWindowBox((Rectangle){ x, y, winW, winH }, TextFormat("WAVE %i COMPLETED! SHOP", wave - 1));
+            GuiWindowBox((Rectangle){ x, y, winW, winH }, TextFormat("WAVE %i COMPLETED! ARMORY UPGRADES", wave - 1));
 
-            // Option 1: Max HP
-            if (GuiButton((Rectangle){ x + 50, y + 60, 280, 40 }, "Increase Max HP (Cost: 500)") && player.points >= 500) {
-                player.max_health += 20;
-                player.health = player.max_health;
-                player.points -= 500;
+            int hp_cost = 400 * hp_level;
+            int dmg_cost = 600 * dmg_level;
+            int speed_cost = 500 * speed_level;
+            int ammo_cost = 300;
+            int hp_refill_cost = 550 * hp_refill_level;
+
+            if (GuiButton((Rectangle){ x + 50, y + 80, 300, 50 }, TextFormat("Max HP +20 (Cost: %i)", hp_cost))) {
+                if (player.points >= hp_cost) {
+                    player.max_health += 20;
+                    player.health = player.max_health;
+                    player.points -= hp_cost;
+                    hp_level++;
+                }
             }
 
-            // Option 2: Damage
-            if (GuiButton((Rectangle){ x + 370, y + 60, 280, 40 }, "Increase Weapon Damage (Cost: 1000)") && player.points >= 1000) {
-                current_gun->damage += 5;
-                player.points -= 1000;
+            if (GuiButton((Rectangle){ x + 400, y + 80, 300, 50 }, TextFormat("Weapon Damage +3 (Cost: %i)", dmg_cost))) {
+                if (player.points >= dmg_cost) {
+                    handgun.damage += 3;
+                    rifle.damage += 3;
+                    player.melee_damage += 4;
+                    player.points -= dmg_cost;
+                    dmg_level++;
+                }
             }
 
-            // Option 3: Refill Ammo
-            if (GuiButton((Rectangle){ x + 50, y + 120, 280, 40 }, "Full Ammo Refill (Cost: 300)") && player.points >= 300) {
-                current_gun->max_current_ammo = current_gun->max_all_ammo;
-                player.points -= 300;
+            if (GuiButton((Rectangle){ x + 50, y + 160, 300, 50 }, TextFormat("Refill All Ammo Reserves (Cost: %i)", ammo_cost))) {
+                if (player.points >= ammo_cost) {
+                    handgun.max_current_ammo = handgun.max_all_ammo;
+                    rifle.max_current_ammo = rifle.max_all_ammo;
+                    player.points -= ammo_cost;
+                }
             }
 
-            // Option 4: Speed
-            if (GuiButton((Rectangle){ x + 370, y + 120, 280, 40 }, "Increase Movement Speed (Cost: 800)") && player.points >= 800) {
-                player.speed += 20;
-                player.points -= 800;
+            if (GuiButton((Rectangle){ x + 400, y + 160, 300, 50 }, TextFormat("Movement Speed +15 (Cost: %i)", speed_cost))) {
+                if (player.points >= speed_cost) {
+                    player.speed += 15;
+                    player.points -= speed_cost;
+                    speed_level++;
+                }
             }
 
-            // Option 5: Rifle
+            if (GuiButton((Rectangle){ x + 225, y + 235, 300, 50 }, TextFormat("Refill HP (Cost: %i)", hp_refill_cost))) {
+                if (player.points >= hp_refill_cost) {
+                    player.health = player.max_health;
+                    player.points -= hp_refill_cost;
+                    hp_refill_level++;
+                }
+            }
+
             if (!rifle.is_unlocked) {
-                if (GuiButton((Rectangle){ x + 50, y + 200, 600, 60 }, "UNLOCK ASSAULT RIFLE (Cost: 3000)") && player.points >= 3000) {
-                    rifle.is_unlocked = true;
-                    player.points -= 3000;
+                if (GuiButton((Rectangle){ x + 150, y + 300, 450, 60 }, "UNLOCK ASSAULT RIFLE (Cost: 6000)")) {
+                    if (player.points >= 6000) {
+                        rifle.is_unlocked = true;
+                        player.points -= 6000;
+                    }
                 }
             } else {
-                GuiLabel((Rectangle){ x + 250, y + 210, 200, 40 }, "RIFLE UNLOCKED - Press '2' to use");
+                GuiLabel((Rectangle){ x + 240, y + 310, 400, 40 }, "ASSAULT RIFLE UNLOCKED - Swap with key '1' and '2'");
             }
 
-            // Exit Button
-            if (GuiButton((Rectangle){ x + 250, y + 320, 200, 40 }, "START NEXT WAVE")) {
+            if (GuiButton((Rectangle){ x + 275, y + 400, 200, 45 }, "START NEXT WAVE")) {
                 is_buy_menu_open = false;
-                spawn_timer = 0;
+                spawn_timer = 0.0f;
             }
         }
 
-        else if (!player.is_alive)
-        {
+        else if (!player.is_alive) {
             ShowCursor();
-            DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), ColorAlpha(BLACK, 0.5f));
+            DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), ColorAlpha(BLACK, 0.8f));
             
-            float winW = 700, winH = 400;
+            float winW = 500, winH = 300;
             float x = (GetScreenWidth() - winW) / 2;
             float y = (GetScreenHeight() - winH) / 2;
 
-            GuiWindowBox((Rectangle){ x, y, winW, winH }, TextFormat("WAVE %i COMPLETED! SHOP", wave - 1));
+            GuiWindowBox((Rectangle){ x, y, winW, winH }, "GAME OVER");
+            DrawText(TextFormat("You survived until Wave: %i", wave), x + 100, y + 80, 20, WHITE);
 
-            if (GuiButton((Rectangle){ x + 250, y + 120, 200, 40 }, "RESTART")) {
- 
-                player.position = { 500, 500 };
-                player.speed = 150;
-                player.max_health = 30;
+            if (GuiButton((Rectangle){ x + 150, y + 140, 200, 40 }, "RESTART")) {
+                player.position = { 960 + float(GetScreenWidth()) / 2, 540 + float(GetScreenHeight() / 2)};
+                player.speed = 180;
+                player.max_health = 40;
                 player.health = player.max_health;
                 player.points = 0;
-                player.melee_damage = 4;
+                player.melee_damage = 8;
                 player.is_alive = true;
                 player.invincible = false;
 
-                rifle.bullet_speed = 2500;
+                hp_level = 1;
+                dmg_level = 1;
+                speed_level = 1;
+                hp_refill_level = 1;
+
+                rifle.max_all_ammo = 450;
                 rifle.ammo_in_magazine = 30;
                 rifle.damage = 15;
-                rifle.magazine_size = 30;
-                rifle.max_all_ammo = 90;
-                rifle.max_current_ammo = 30;
-                rifle.reload_time = 2.0f; 
+                rifle.max_current_ammo = 120;
                 rifle.is_unlocked = false;
 
-                handgun.bullet_speed = 2500;
+                handgun.max_all_ammo = 250;
                 handgun.ammo_in_magazine = 10;
-                handgun.damage = 5;
-                handgun.magazine_size = 10;
-                handgun.max_all_ammo = 40;
-                handgun.max_current_ammo = 10;
-                handgun.reload_time = 1.5f; 
-                handgun.is_unlocked = true;
+                handgun.damage = 7;
+                handgun.max_current_ammo = 80;
 
                 current_gun = &handgun;
                 current_gun_state = 0;
 
                 enemies.clear();
                 bullets.clear();
-                exp_orbs.clear();
                 
                 spawn_timer = 0.0f;
                 wave_timer = 30.0f; 
                 wave = 1;
-                enemies_to_defeat = 5;
-                enemies_to_spawn = 5;
+                enemies_to_defeat = 8;
+                enemies_to_spawn = 8;
                 
                 is_reloading = false;
                 is_moving = false;
                 is_melee = false;
                 is_buy_menu_open = false;
-
+                is_paused = false;
                 camera.target = player.position;
             }
 
-            if (GuiButton((Rectangle){ x + 250, y + 220, 200, 40 }, "EXIT")) {
+            if (GuiButton((Rectangle){ x + 150, y + 200, 200, 40 }, "EXIT")) {
                 break;
             }
         }
         
+        else if (is_paused){
+            DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), ColorAlpha(BLACK, 0.8f));
+            
+            float x = GetScreenWidth() / 2 - 50;
+            float y = GetScreenHeight() / 2;
+            DrawText("PAUSED", x, y, 25, WHITE);
+        }
+        
         EndDrawing();
     }
-   
-    // Cleanup
-    UnloadTexture(enemyTexture);
-    UnloadTexture(orbTexture);
+
     UnloadTexture(background_texture);
     UnloadTexture(crosshair_texture);
+    UnloadMusicStream(music);
+    UnloadSound(gun_shot);
+    
+    for(int i = 0; i < 3; i++) {
+        UnloadSound(zombie_grunts[i]);
+    }
+    
     for (auto const& [name, frames] : animations) {
         for (Texture2D tex : frames) UnloadTexture(tex);
     }
+    CloseAudioDevice();
     CloseWindow();
 
     return 0;
