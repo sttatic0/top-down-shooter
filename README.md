@@ -2,12 +2,14 @@
 
 - Thank you for using this template. 
 
-### Requirements:
-
-- Windows  
-- [Raylib](https://www.raylib.com/ ) installed in the default path.  
-
 ### Usage
 
-- Modify the game code
-- Build using `build.bat`
+- Run main.exe
+
+### Controls
+
+- Move: WASD or Arrow keys
+- Shoot: Left mouse button or Space
+- Relaod: R
+- Melee: F
+- Quit: Escape
